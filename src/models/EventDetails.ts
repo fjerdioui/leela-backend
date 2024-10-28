@@ -1,32 +1,39 @@
-// src/models/EventDetails.ts
 import mongoose, { Schema, Document } from 'mongoose';
 
-export interface IEventDetails extends Document {
-    eventId: string;
-    fullDescription: string;
-    images: string[];
-    additionalVenues: string[];
-    completeAddress: string;
-    priceBreakdown: string;
-    attractions: string[];
-    categories: string[];
-    additionalNotes: string;
-    promoterInfo: string;
-    ticketLink: string;
+interface IEventDetails extends Document {
+    name: string;
+    type: string;
+    description: string;
+    url: string;
+    locale: string;
+    sales: mongoose.Schema.Types.ObjectId; // Reference to Sales
+    dates: mongoose.Schema.Types.ObjectId; // Reference to DateInfo
+    classifications: mongoose.Schema.Types.ObjectId[]; // Array of Classification references
+    images: mongoose.Schema.Types.ObjectId[]; // Array of Image references
+    priceRanges: {
+        currency: string;
+    }[];
+    venue: mongoose.Schema.Types.ObjectId; // Reference to Venue
+    attractions: mongoose.Schema.Types.ObjectId[]; // Array of Attraction references
 }
 
 const EventDetailsSchema: Schema = new Schema({
-    eventId: { type: Schema.Types.ObjectId, ref: 'Event', required: true },
-    fullDescription: { type: String, required: true },
-    images: [{ type: String }],
-    additionalVenues: [{ type: String }],
-    completeAddress: { type: String },
-    priceBreakdown: { type: String },
-    attractions: [{ type: String }],
-    categories: [{ type: String }],
-    additionalNotes: { type: String },
-    promoterInfo: { type: String },
-    ticketLink: { type: String, required: true },
+    name: { type: String, required: true },
+    type: { type: String },
+    description: { type: String },
+    url: { type: String },
+    locale: { type: String },
+    sales: { type: mongoose.Schema.Types.ObjectId, ref: 'Sales' },
+    dates: { type: mongoose.Schema.Types.ObjectId, ref: 'DateInfo' },
+    classifications: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Classification' }],
+    images: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Image' }],
+    priceRanges: [
+        {
+            currency: { type: String },
+        },
+    ],
+    venue: { type: mongoose.Schema.Types.ObjectId, ref: 'Venue', required: true },
+    attractions: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Attraction' }],
 });
 
 export default mongoose.model<IEventDetails>('EventDetails', EventDetailsSchema);

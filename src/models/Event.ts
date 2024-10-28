@@ -1,6 +1,7 @@
 // src/models/Event.ts
 import mongoose, { Schema, Document } from 'mongoose';
 
+// Event interface to define the structure of an event document
 export interface IEvent extends Document {
     name: string;
     venueName: string;
@@ -24,6 +25,7 @@ export interface IEvent extends Document {
     ticketLink: string;
 }
 
+// Event schema to define the fields and structure of event data in MongoDB
 const EventSchema: Schema = new Schema({
     name: { type: String, required: true },
     venueName: { type: String, required: true },
