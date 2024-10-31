@@ -1,7 +1,7 @@
 import axios from 'axios';
 import Event from '../models/Event';
 import EventDetails from '../models/EventDetails';
-import Classification from '../models/classification';
+import Classification from '../models/Classification';
 import DateInfo from '../models/DateInfo';
 import Sales from '../models/Sales';
 import Image from '../models/Image';
@@ -21,7 +21,7 @@ export const getEventCountForZone = async (
     endDate: string
 ): Promise<number> => {
     try {
-        const response = await axios.get(`https://app.ticketmaster.com/discovery/v2/events.json`, {
+        const response = await axios.get<{ page: { totalElements: number } }>(`https://app.ticketmaster.com/discovery/v2/events.json`, {
             params: {
                 apikey: process.env.TICKETMASTER_API_KEY,
                 countryCode,
@@ -38,9 +38,12 @@ export const getEventCountForZone = async (
 
         const rateLimitAvailable = response.headers['rate-limit-available'];
         const rateLimitReset = parseInt(response.headers['rate-limit-reset'] || '0', 10) * 1000;
+
         if (rateLimitAvailable === '0') {
-            console.log(`Rate limit reached. Waiting ${rateLimitReset / 1000} seconds.`);
-            await wait(rateLimitReset);
+            // console.log(`Rate limit reached. Waiting ${rateLimitReset / 1000} seconds.`);
+            console.log('Waiting for 2 sec ...');
+
+            await wait(2000);
         }
 
         console.log(`Event count for ${eventType} in ${city} between ${startDate} and ${endDate}:`, response.data.page.totalElements);
@@ -81,7 +84,7 @@ export const fetchAllTicketmasterEvents = async (
             try {
                 console.log(`Fetching page ${currentPage}/${totalPages} for ${eventType} events in ${city}.`);
 
-                const response = await axios.get(`https://app.ticketmaster.com/discovery/v2/events.json`, {
+                const response = await axios.get<{ _embedded?: { events: any[] } }>(`https://app.ticketmaster.com/discovery/v2/events.json`, {
                     params: {
                         apikey: process.env.TICKETMASTER_API_KEY,
                         countryCode,
@@ -165,8 +168,8 @@ export const fetchAllTicketmasterEvents = async (
                             locale: event.locale,
                             sales: salesRef._id,
                             dates: dateRef._id,
-                            classifications: classificationRefs.map(ref => ref._id),
-                            images: imageRefs.map(ref => ref._id),
+                            classifications: classificationRefs.map((ref: any) => ref._id),
+                            images: imageRefs.map((ref: any) => ref._id),
                             venue: venueRef._id,
                             attractions: [], // Add attractions if available in a similar way
                         };

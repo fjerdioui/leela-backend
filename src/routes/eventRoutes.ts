@@ -1,6 +1,8 @@
 // src/routes/eventRoutes.ts
 import { Router, Request, Response } from 'express';
 import { getEvents, createEvent, uploadEvents, getEventById, fetchEvents } from '../controllers/eventController';
+import EventModel from '../models/Event';
+import EventDetails from '../models/EventDetails';
 
 const router = Router();
 
@@ -26,12 +28,25 @@ router.get('/events/:id', async (req: Request, res: Response) => {
 
 // Route to fetch events from Ticketmaster API with filtering
 router.get('/fetchTicketmasterEvents', async (req: Request, res: Response) => {
+    const { clear } = req.query;
+
     try {
+        // Check if 'clear' is present and set to 'true', then clear the database
+        if (clear === 'true') {
+            await EventModel.deleteMany({});
+            await EventDetails.deleteMany({});
+            console.log('Database cleared successfully before fetching events.');
+        }
+
+        // Proceed to fetch events
         await fetchEvents(req, res);
+
+        res.status(200).json({ message: 'Events fetched successfully' });
     } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
         res.status(500).json({ message: 'Failed to fetch events from Ticketmaster', error: errorMessage });
     }
 });
+
 
 export default router;

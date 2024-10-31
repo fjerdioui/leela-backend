@@ -1,6 +1,7 @@
 // src/controllers/eventController.ts
 import { Request, Response } from 'express';
 import Event from '../models/Event';
+import EventDetails from '../models/EventDetails';
 import moment from 'moment';
 import { fetchAllTicketmasterEvents } from '../api/fetchTicketmasterEvents';
 
@@ -9,7 +10,7 @@ import { fetchAllTicketmasterEvents } from '../api/fetchTicketmasterEvents';
  */
 export const getEvents = async (req: Request, res: Response) => {
     try {
-        const events = await Event.find();
+        const events = await EventDetails.find();
         res.status(200).json(events);
     } catch (error) {
         console.error('Error fetching events:', error);
