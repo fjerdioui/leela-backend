@@ -26,27 +26,27 @@ export interface IVenue extends Document {
 
 const VenueSchema: Schema = new Schema({
     name: { type: String, required: true },
-    url: { type: String },
-    postalCode: { type: String },
-    timezone: { type: String },
-    city: { type: String },
-    country: { type: String },
-    address: { type: String },
+    url: { type: String, default: '' },
+    postalCode: { type: String, default: '' },
+    timezone: { type: String, default: '' },
+    city: { type: String, default: '' },
+    country: { type: String, default: '' },
+    address: { type: String, default: '' },
     location: {
-        longitude: { type: Number },
-        latitude: { type: Number },
+        longitude: { type: Number, required: true },
+        latitude: { type: Number, required: true },
     },
     markets: [
         {
-            name: { type: String },
-            id: { type: String },
+            name: { type: String, default: '' },
+            id: { type: String, default: '' },
         },
     ],
     ada: {
-        adaPhones: { type: String },
-        adaCustomCopy: { type: String },
-        adaHours: { type: String },
+        adaPhones: { type: String, default: '' },
+        adaCustomCopy: { type: String, default: '' },
+        adaHours: { type: String, default: '' },
     },
-});
+}, { timestamps: true }); // optional timestamps for createdAt and updatedAt
 
 export default mongoose.model<IVenue>('Venue', VenueSchema);

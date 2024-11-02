@@ -4,6 +4,11 @@ import Event from '../models/Event';
 import EventDetails from '../models/EventDetails';
 import moment from 'moment';
 import { fetchAllTicketmasterEvents } from '../api/fetchTicketmasterEvents';
+import Classification from '../models/Classification';
+import DateInfo from '../models/DateInfo';
+import Sales from '../models/Sales';
+import Venue from '../models/Venue';
+import Image from '../models/Image';
 
 /**
  * Fetches all events from the database.
@@ -67,8 +72,7 @@ export const getEventById = async (req: Request, res: Response) => {
  * and inserts/updates them in the database.
  */
 export const fetchEvents = async (req: Request, res: Response) => {
-    const { countryCode, city, type, region } = req.query;
-    const initialZoneRadius = parseFloat(region as string) || 10; // Default radius if not specified
+    const { countryCode, city, type } = req.query;
 
     // Validate required parameters
     if (!countryCode || !city || !type) {
@@ -107,3 +111,13 @@ export const fetchEvents = async (req: Request, res: Response) => {
         res.status(500).json({ message: 'Failed to fetch events from Ticketmaster', error: errorMessage });
     }
 };
+
+export const clearDB = async () => {
+    await EventDetails.deleteMany({});
+    await Classification.deleteMany({});
+    await DateInfo.deleteMany({});
+    await Sales.deleteMany({});
+    await Image.deleteMany({});
+    await Venue.deleteMany({});
+    console.log('Database cleared successfully before fetching events.');
+}

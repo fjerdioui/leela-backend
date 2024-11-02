@@ -3,7 +3,6 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import connectDB from './config/db';
 import eventRoutes from './routes/eventRoutes';
-import { fetchAllTicketmasterEvents } from './api/fetchTicketmasterEvents';
 
 dotenv.config(); // Load environment variables from .env
 
