@@ -11,11 +11,34 @@ import Venue from '../models/Venue';
 import Image from '../models/Image';
 
 /**
- * Fetches all events from the database.
+ * Fetches events within specified geographic bounds.
  */
 export const getEvents = async (req: Request, res: Response) => {
+    const { minLat, maxLat, minLng, maxLng } = req.query;
+
+    // Log incoming bounds from the frontend
+    console.log("Backend: Incoming bounds:", { minLat, maxLat, minLng, maxLng });
+
+    if (!minLat || !maxLat || !minLng || !maxLng) {
+        return res.status(400).json({ message: "Bounding box parameters are required." });
+    }
+
     try {
-        const events = await EventDetails.find();
+        // Parse bounds from query
+        const parsedMinLat = parseFloat(minLat as string);
+        const parsedMaxLat = parseFloat(maxLat as string);
+        const parsedMinLng = parseFloat(minLng as string);
+        const parsedMaxLng = parseFloat(maxLng as string);
+
+        console.log("Backend: Parsed bounds:", { parsedMinLat, parsedMaxLat, parsedMinLng, parsedMaxLng });
+
+        // Query events within the bounding box
+        const events = await EventDetails.find({
+            "location.latitude": { $gte: parsedMinLat, $lte: parsedMaxLat },
+            "location.longitude": { $gte: parsedMinLng, $lte: parsedMaxLng }
+        });
+
+        console.log(`Found ${events.length} events within bounds.`);
         res.status(200).json(events);
     } catch (error) {
         console.error('Error fetching events:', error);
