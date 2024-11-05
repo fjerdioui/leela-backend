@@ -6,6 +6,9 @@ import Sales from '../models/Sales';
 import Image from '../models/Image';
 import Venue from '../models/Venue';
 import moment from 'moment';
+import Attraction from '../models/Attraction';
+import PriceRange from '../models/PriceRange'; // Import PriceRange model
+import mongoose from 'mongoose';
 
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -42,22 +45,18 @@ const geocodeAddress = async (
             }
         });
 
-        // Cast response.data to expected type
-        const data = response.data as GeocodeResponse[]; // Adjust if GeocodeResponse is an array
-
+        const data = response.data as GeocodeResponse[];
         if (data[0]) {
             return {
                 latitude: parseFloat(data[0].lat),
                 longitude: parseFloat(data[0].lon),
             };
         }
-    } catch (error: unknown) {
-        // Cast error as Error for safe access
+    } catch (error) {
         console.error(`Geocoding failed for address "${address}":`, (error as Error).message);
     }
     return null;
 };
-
 
 /**
  * Get the total count of events in a specific city and type for a given date range.
@@ -82,8 +81,7 @@ export const getEventCountForZone = async (
             }
         });
 
-        const data = response.data as TicketmasterResponse;
-        return data.page.totalElements;
+        return response.data.page.totalElements;
     } catch (error) {
         console.error("Error fetching event count:", (error as any).message);
         return 0;
@@ -95,12 +93,9 @@ export const getEventCountForZone = async (
  * and store them in the database using references to normalized data models.
  */
 export const fetchAllTicketmasterEvents = async (
-    countryCode: string,
-    city: string,
-    eventType: string,
-    startDate: string,
-    endDate: string
+    reqParams: { countryCode: string; city: string; eventType: string; startDate: string; endDate: string }
 ) => {
+    const { countryCode, city, eventType, startDate, endDate } = reqParams;
     const pageSize = 200;
     const maxRetries = 3;
     const eventCount = await getEventCountForZone(countryCode, city, eventType, startDate, endDate);
@@ -129,10 +124,8 @@ export const fetchAllTicketmasterEvents = async (
                     }
                 });
 
-                const events = response.data._embedded?.events || [];
-                console.log(`Page ${pageNumber}: Found ${events.length} events.`);
-                return events;
-            } catch (error: unknown) {
+                return response.data._embedded?.events || [];
+            } catch (error) {
                 retryCount++;
                 console.error(`Error fetching page ${pageNumber}, attempt ${retryCount}:`, (error as any).message);
                 if (retryCount < maxRetries) await wait(2000);
@@ -152,29 +145,24 @@ export const fetchAllTicketmasterEvents = async (
             return null;
         }
 
-        let latitude = parseFloat(venue.location?.latitude);
-        let longitude = parseFloat(venue.location?.longitude);
+        // Check event location first, fallback to venue location if necessary
+        let latitude = parseFloat(event.location?.latitude) || parseFloat(venue.location?.latitude);
+        let longitude = parseFloat(event.location?.longitude) || parseFloat(venue.location?.longitude);
 
-        // Geocode if coordinates are missing
         if (isNaN(latitude) || isNaN(longitude)) {
-            console.warn(`Event "${event.name}" has an address but missing coordinates. Attempting geocoding.`);
             const geocodedLocation = await geocodeAddress(
                 venue.address.line1,
                 venue.postalCode,
-                venue.city,
-                venue.country
+                venue.city?.name || city,
+                venue.country?.countryCode || countryCode
             );
             if (geocodedLocation) {
                 latitude = geocodedLocation.latitude;
                 longitude = geocodedLocation.longitude;
-                console.log(`Geocoded address for event "${event.name}":`, geocodedLocation);
             } else {
-                console.warn(`Geocoding failed for event "${event.name}".`);
+                return null;
             }
         }
-
-        latitude = isNaN(latitude) ? 0 : latitude;
-        longitude = isNaN(longitude) ? 0 : longitude;
 
         const classificationRefs = await Promise.all((event.classifications || []).map(async (classItem: any) => {
             const existing = await Classification.findOne({
@@ -220,13 +208,35 @@ export const fetchAllTicketmasterEvents = async (
                 url: venue.url,
                 postalCode: venue.postalCode,
                 timezone: venue.timezone,
-                city: venue.city?.name,
-                country: venue.country?.countryCode,
+                city: venue.city?.name || city,
+                country: venue.country?.countryCode || countryCode,
                 address: venue.address?.line1,
                 location: { longitude, latitude }
             },
             { upsert: true, new: true }
         );
+
+        // Handling price ranges as ObjectId references with validation
+        const priceRangeRefs = await Promise.all((event.priceRanges || []).map(async (priceRange: any) => {
+            if (priceRange.min !== undefined && priceRange.max !== undefined) {
+                const newPriceRange = await PriceRange.create({
+                    type: priceRange.type || 'standard',
+                    currency: priceRange.currency,
+                    min: priceRange.min,
+                    max: priceRange.max,
+                });
+                return newPriceRange._id;
+            } else {
+                console.warn(`Skipping incomplete price range for event "${event.name}".`);
+                return null;
+            }
+        }).filter((ref: mongoose.Types.ObjectId | null): ref is mongoose.Types.ObjectId => ref !== null)); // Type assertion for non-null values
+
+        // Handling attractions as ObjectId references
+        const attractionRefs = await Promise.all((event._embedded?.attractions || []).map(async (attraction: any) => {
+            const existingAttraction = await Attraction.findOne({ name: attraction.name });
+            return existingAttraction ? existingAttraction._id : (await Attraction.create({ name: attraction.name, url: attraction.url }))._id;
+        }));
 
         return {
             name: event.name,
@@ -239,8 +249,9 @@ export const fetchAllTicketmasterEvents = async (
             classifications: classificationRefs.map((ref: any) => ref._id),
             images: imageRefs.map((ref: any) => ref._id),
             venue: venueRef._id,
-            location: { latitude, longitude }, // Assign location directly to EventDetails
-            attractions: [],
+            location: { latitude, longitude },
+            priceRanges: priceRangeRefs, // Save as ObjectId references
+            attractions: attractionRefs,
         };
     }));
 

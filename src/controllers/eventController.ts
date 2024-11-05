@@ -1,4 +1,3 @@
-// src/controllers/eventController.ts
 import { Request, Response } from 'express';
 import Event from '../models/Event';
 import EventDetails from '../models/EventDetails';
@@ -9,6 +8,7 @@ import DateInfo from '../models/DateInfo';
 import Sales from '../models/Sales';
 import Venue from '../models/Venue';
 import Image from '../models/Image';
+import mongoose from 'mongoose';
 
 /**
  * Fetches events within specified geographic bounds.
@@ -16,7 +16,6 @@ import Image from '../models/Image';
 export const getEvents = async (req: Request, res: Response) => {
     const { minLat, maxLat, minLng, maxLng } = req.query;
 
-    // Log incoming bounds from the frontend
     console.log("Backend: Incoming bounds:", { minLat, maxLat, minLng, maxLng });
 
     if (!minLat || !maxLat || !minLng || !maxLng) {
@@ -24,7 +23,6 @@ export const getEvents = async (req: Request, res: Response) => {
     }
 
     try {
-        // Parse bounds from query
         const parsedMinLat = parseFloat(minLat as string);
         const parsedMaxLat = parseFloat(maxLat as string);
         const parsedMinLng = parseFloat(minLng as string);
@@ -32,7 +30,6 @@ export const getEvents = async (req: Request, res: Response) => {
 
         console.log("Backend: Parsed bounds:", { parsedMinLat, parsedMaxLat, parsedMinLng, parsedMaxLng });
 
-        // Query events within the bounding box
         const events = await EventDetails.find({
             "location.latitude": { $gte: parsedMinLat, $lte: parsedMaxLat },
             "location.longitude": { $gte: parsedMinLng, $lte: parsedMaxLng }
@@ -78,15 +75,109 @@ export const uploadEvents = async (req: Request, res: Response) => {
  */
 export const getEventById = async (req: Request, res: Response) => {
     try {
-        const event = await Event.findById(req.params.id);
-        if (!event) {
-            console.log(`Event with ID ${req.params.id} not found`);
+        const eventId = req.params.id;
+
+        if (!mongoose.Types.ObjectId.isValid(eventId)) {
+            return res.status(400).json({ message: 'Invalid event ID format' });
+        }
+
+        // Aggregation pipeline to match the event by ID and populate all related fields
+        const event = await EventDetails.aggregate([
+            { $match: { _id: new mongoose.Types.ObjectId(eventId) } },
+
+            // Populate images
+            {
+                $lookup: {
+                    from: 'images',
+                    localField: 'images',
+                    foreignField: '_id',
+                    as: 'images'
+                }
+            },
+
+            // Populate venue
+            {
+                $lookup: {
+                    from: 'venues',
+                    localField: 'venue',
+                    foreignField: '_id',
+                    as: 'venue'
+                }
+            },
+
+            // Populate classifications
+            {
+                $lookup: {
+                    from: 'classifications',
+                    localField: 'classifications',
+                    foreignField: '_id',
+                    as: 'classifications'
+                }
+            },
+
+            // Populate dates
+            {
+                $lookup: {
+                    from: 'dates',
+                    localField: 'dates',
+                    foreignField: '_id',
+                    as: 'dates'
+                }
+            },
+
+            // Populate sales
+            {
+                $lookup: {
+                    from: 'sales',
+                    localField: 'sales',
+                    foreignField: '_id',
+                    as: 'sales'
+                }
+            },
+
+            // Populate attractions
+            {
+                $lookup: {
+                    from: 'attractions',
+                    localField: 'attractions',
+                    foreignField: '_id',
+                    as: 'attractions'
+                }
+            },
+
+            // Conditional lookup for priceRanges (only if it exists and is not empty)
+            {
+                $lookup: {
+                    from: 'priceRanges',
+                    localField: 'priceRanges',
+                    foreignField: '_id',
+                    as: 'priceRanges'
+                }
+            },
+            // Remove empty priceRanges if it does not contain valid references
+            {
+                $addFields: {
+                    priceRanges: {
+                        $cond: {
+                            if: { $or: [{ $eq: ["$priceRanges", []] }, { $eq: ["$priceRanges", null] }] },
+                            then: [],
+                            else: "$priceRanges"
+                        }
+                    }
+                }
+            }
+
+            // Add additional conditional lookups here if other fields require similar checks
+        ]);
+
+        if (!event || event.length === 0) {
             return res.status(404).json({ message: 'Event not found' });
         }
-        res.status(200).json(event);
+
+        res.status(200).json(event[0]); // Return the first item in the array
     } catch (error) {
         console.error('Error fetching event by ID:', error);
-        res.status(500).json({ error: 'Error fetching event' });
+        res.status(500).json({ message: 'Server error', error });
     }
 };
 
@@ -97,13 +188,11 @@ export const getEventById = async (req: Request, res: Response) => {
 export const fetchEvents = async (req: Request, res: Response) => {
     const { countryCode, city, type } = req.query;
 
-    // Validate required parameters
     if (!countryCode || !city || !type) {
         console.log('Missing required parameters');
         return res.status(400).json({ message: "countryCode, city, and type are required parameters." });
     }
 
-    // Set initial start and end dates for a weekly range
     let startDate = moment().toISOString();
     let endDate = moment().add(1, 'weeks').toISOString();
     const totalWeeks = 8;
@@ -112,16 +201,14 @@ export const fetchEvents = async (req: Request, res: Response) => {
         for (let week = 0; week < totalWeeks; week++) {
             console.log(`Fetching events for week ${week + 1}: ${startDate} to ${endDate}`);
 
-            // Fetch and store events for the current week range
-            await fetchAllTicketmasterEvents(
-                countryCode as string,
-                city as string,
-                type as string,
+            await fetchAllTicketmasterEvents({
+                countryCode: countryCode as string,
+                city: city as string,
+                eventType: type as string,
                 startDate,
                 endDate
-            );
+            });
 
-            // Move to the next week
             startDate = moment(startDate).add(1, 'weeks').toISOString();
             endDate = moment(endDate).add(1, 'weeks').toISOString();
         }
