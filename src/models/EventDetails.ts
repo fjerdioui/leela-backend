@@ -15,6 +15,8 @@ interface IEventDetails extends Document {
     venue: mongoose.Schema.Types.ObjectId; // Reference to Venue
     attractions: mongoose.Schema.Types.ObjectId[]; // Array of Attraction references
     location: { latitude: number; longitude: number }; // Location field
+    source: string; // e.g., "ticketmaster"
+    sourceId: string; // e.g., the ID from Ticketmaster or another source
 }
 
 const EventDetailsSchema: Schema = new Schema({
@@ -33,7 +35,9 @@ const EventDetailsSchema: Schema = new Schema({
     location: {
         latitude: { type: Number, required: true },
         longitude: { type: Number, required: true }
-    }
+    },
+    source: { type: String, required: true },
+    sourceId: { type: String, required: true },
 }, { timestamps: true });
 
 export default mongoose.model<IEventDetails>('EventDetails', EventDetailsSchema);

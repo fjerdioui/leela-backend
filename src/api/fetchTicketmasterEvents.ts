@@ -250,8 +250,10 @@ export const fetchAllTicketmasterEvents = async (
             images: imageRefs.map((ref: any) => ref._id),
             venue: venueRef._id,
             location: { latitude, longitude },
-            priceRanges: priceRangeRefs, // Save as ObjectId references
+            priceRanges: priceRangeRefs, 
             attractions: attractionRefs,
+            source: 'ticketmaster', 
+            sourceId: event.id, 
         };
     }));
 

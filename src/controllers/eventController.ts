@@ -154,6 +154,7 @@ export const getEventById = async (req: Request, res: Response) => {
                     as: 'priceRanges'
                 }
             },
+
             // Remove empty priceRanges if it does not contain valid references
             {
                 $addFields: {
@@ -166,8 +167,6 @@ export const getEventById = async (req: Request, res: Response) => {
                     }
                 }
             }
-
-            // Add additional conditional lookups here if other fields require similar checks
         ]);
 
         if (!event || event.length === 0) {
