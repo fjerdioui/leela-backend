@@ -1,2 +1,7 @@
 npm install
 npm run dev 
+
+SB
+eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFhZG9kc2d4YnhvY2t3Y2dod2N4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzA5MDI0NDgsImV4cCI6MjA0NjQ3ODQ0OH0.izBOP9vMvSP5_peTBy0jgiicgVwTt7T5h7ECwnYZ0HY
+
+https://qadodsgxbxockwcghwcx.supabase.co

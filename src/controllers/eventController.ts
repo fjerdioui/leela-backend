@@ -13,13 +13,15 @@ import mongoose from 'mongoose';
 /**
  * Fetches events within specified geographic bounds.
  */
-export const getEvents = async (req: Request, res: Response) => {
-    const { minLat, maxLat, minLng, maxLng } = req.query;
+export const getEvents = async (req: Request, res: Response): Promise<void> => {
+    const { minLat, maxLat, minLng, maxLng, musicType, genre, startDate, endDate } = req.query;
 
-    console.log("Backend: Incoming bounds:", { minLat, maxLat, minLng, maxLng });
+    console.log("Backend: Incoming filters:", { minLat, maxLat, minLng, maxLng, musicType, genre, startDate, endDate });
 
+    // Validate and parse query parameters
     if (!minLat || !maxLat || !minLng || !maxLng) {
-        return res.status(400).json({ message: "Bounding box parameters are required." });
+        res.status(400).json({ message: "Bounding box parameters are required." });
+        return;
     }
 
     try {
@@ -28,20 +30,65 @@ export const getEvents = async (req: Request, res: Response) => {
         const parsedMinLng = parseFloat(minLng as string);
         const parsedMaxLng = parseFloat(maxLng as string);
 
-        console.log("Backend: Parsed bounds:", { parsedMinLat, parsedMaxLat, parsedMinLng, parsedMaxLng });
+        if (isNaN(parsedMinLat) || isNaN(parsedMaxLat) || isNaN(parsedMinLng) || isNaN(parsedMaxLng)) {
+            res.status(400).json({ message: "Invalid bounding box parameters." });
+            return;
+        }
 
-        const events = await EventDetails.find({
+        const query: any = {
             "location.latitude": { $gte: parsedMinLat, $lte: parsedMaxLat },
-            "location.longitude": { $gte: parsedMinLng, $lte: parsedMaxLng }
-        });
+            "location.longitude": { $gte: parsedMinLng, $lte: parsedMaxLng },
+        };
 
-        console.log(`Found ${events.length} events within bounds.`);
+        // Add music type filter
+        if (musicType) {
+            query["classifications.segment"] = musicType; // Assuming `segment` contains music type
+        }
+
+        // Add genre filter
+        if (genre) {
+            query["classifications.genre"] = genre; // Assuming `genre` field exists
+        }
+
+        // Add date range filter
+        if (startDate || endDate) {
+            query["dates.startDate"] = {};
+            if (startDate) {
+                query["dates.startDate"].$gte = new Date(startDate as string);
+            }
+            if (endDate) {
+                query["dates.startDate"].$lte = new Date(endDate as string);
+            }
+        }
+
+        console.log("Backend: Parsed query:", query);
+
+        // Fetch events within the bounding box and filters
+        const events = await EventDetails.find(
+            query,
+            "name location url dates sales classifications"
+        )
+            .populate("dates", "startDate endDate")
+            .populate("sales", "public salesStart salesEnd")
+            .populate("classifications", "segment genre subGenre");
+
+        if (events.length === 0) {
+            console.log("No events found with specified filters.");
+            res.status(404).json({ message: "No events found with specified filters." });
+            return;
+        }
+
+        console.log(`Found ${events.length} events with specified filters.`);
         res.status(200).json(events);
-    } catch (error) {
-        console.error('Error fetching events:', error);
-        res.status(500).json({ error: 'Error fetching events' });
+    } catch (error: any) {
+        console.error("Error fetching events:", error.message);
+        res.status(500).json({
+            error: "Error fetching events",
+            details: error.message,
+        });
     }
 };
+
 
 /**
  * Creates a new event and saves it to the database.

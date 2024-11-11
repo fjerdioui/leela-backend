@@ -1,52 +1,61 @@
-// src/models/Venue.ts
 import mongoose, { Schema, Document } from 'mongoose';
 
-export interface IVenue extends Document {
+interface Venue extends Document {
     name: string;
     url: string;
     postalCode: string;
     timezone: string;
     city: string;
     country: string;
-    address: string;
-    location: {
-        longitude: number;
-        latitude: number;
+    address: {
+        line1: string;
+        line2?: string;
     };
-    markets: {
-        name: string;
-        id: string;
-    }[];
-    ada: {
-        adaPhones: string;
-        adaCustomCopy: string;
-        adaHours: string;
+    location: {
+        latitude: number;
+        longitude: number;
+    };
+    markets?: Array<{ name: string; id: string }>;
+    dmas?: Array<{ id: number }>;
+    parkingDetail?: string;
+    accessibleSeatingDetail?: string;
+    generalInfo?: {
+        childRule?: string;
+    };
+    ada?: {
+        adaPhones?: string;
+        adaCustomCopy?: string;
+        adaHours?: string;
     };
 }
 
 const VenueSchema: Schema = new Schema({
     name: { type: String, required: true },
     url: { type: String, default: '' },
-    postalCode: { type: String, default: '' },
-    timezone: { type: String, default: '' },
-    city: { type: String, default: '' },
-    country: { type: String, default: '' },
-    address: { type: String, default: '' },
+    postalCode: { type: String },
+    timezone: { type: String },
+    city: { type: String },
+    country: { type: String },
+    address: {
+        line1: { type: String },
+        line2: { type: String, default: '' }
+    },
     location: {
-        longitude: { type: Number, required: true },
         latitude: { type: Number, required: true },
+        longitude: { type: Number, required: true }
     },
-    markets: [
-        {
-            name: { type: String, default: '' },
-            id: { type: String, default: '' },
-        },
-    ],
+    markets: [{ name: String, id: String }],
+    dmas: [{ id: Number }],
+    parkingDetail: { type: String },
+    accessibleSeatingDetail: { type: String },
+    generalInfo: {
+        childRule: { type: String }
+    },
     ada: {
-        adaPhones: { type: String, default: '' },
-        adaCustomCopy: { type: String, default: '' },
-        adaHours: { type: String, default: '' },
-    },
-}, { timestamps: true }); // optional timestamps for createdAt and updatedAt
+        adaPhones: { type: String },
+        adaCustomCopy: { type: String },
+        adaHours: { type: String }
+    }
+});
 
-export default mongoose.model<IVenue>('Venue', VenueSchema);
+export default mongoose.model<Venue>('Venue', VenueSchema);

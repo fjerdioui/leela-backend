@@ -7,7 +7,7 @@ import Image from '../models/Image';
 import Venue from '../models/Venue';
 import moment from 'moment';
 import Attraction from '../models/Attraction';
-import PriceRange from '../models/PriceRange'; // Import PriceRange model
+import PriceRange from '../models/PriceRange';
 import mongoose from 'mongoose';
 
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -22,9 +22,6 @@ interface GeocodeResponse {
     lon: string;
 }
 
-/**
- * Geocode address to obtain latitude and longitude if coordinates are missing.
- */
 const geocodeAddress = async (
     address: string,
     postalCode?: string,
@@ -58,9 +55,6 @@ const geocodeAddress = async (
     return null;
 };
 
-/**
- * Get the total count of events in a specific city and type for a given date range.
- */
 export const getEventCountForZone = async (
     countryCode: string,
     city: string,
@@ -88,10 +82,6 @@ export const getEventCountForZone = async (
     }
 };
 
-/**
- * Fetch events from Ticketmaster for the specified date range and parameters,
- * and store them in the database using references to normalized data models.
- */
 export const fetchAllTicketmasterEvents = async (
     reqParams: { countryCode: string; city: string; eventType: string; startDate: string; endDate: string }
 ) => {
@@ -99,12 +89,9 @@ export const fetchAllTicketmasterEvents = async (
     const pageSize = 200;
     const maxRetries = 3;
     const eventCount = await getEventCountForZone(countryCode, city, eventType, startDate, endDate);
-    const totalPages = Math.ceil(eventCount / pageSize);
+    const totalPages = Math.min(Math.ceil(eventCount / pageSize), 4);
 
-    if (totalPages > 4) {
-        console.log("Event count too high; please refine with more filters.");
-        return;
-    }
+    console.log(`Total event count for range: ${eventCount}. Dividing into ${totalPages} pages.`);
 
     const fetchPage = async (pageNumber: number) => {
         let retryCount = 0;
@@ -124,6 +111,11 @@ export const fetchAllTicketmasterEvents = async (
                     }
                 });
 
+                const rateLimitRemaining = response.headers['x-ratelimit-remaining'];
+                if (rateLimitRemaining) {
+                    console.log(`Ticketmaster API calls remaining: ${rateLimitRemaining}`);
+                }
+
                 return response.data._embedded?.events || [];
             } catch (error) {
                 retryCount++;
@@ -139,13 +131,11 @@ export const fetchAllTicketmasterEvents = async (
 
     const eventDetailsData = await Promise.all(allEvents.map(async (event: any) => {
         const venue = event._embedded?.venues?.[0];
-
         if (!venue || !venue.address?.line1) {
             console.warn(`Skipping event "${event.name}" due to missing address.`);
             return null;
         }
 
-        // Check event location first, fallback to venue location if necessary
         let latitude = parseFloat(event.location?.latitude) || parseFloat(venue.location?.latitude);
         let longitude = parseFloat(event.location?.longitude) || parseFloat(venue.location?.longitude);
 
@@ -180,7 +170,8 @@ export const fetchAllTicketmasterEvents = async (
         }));
 
         const imageRefs = await Promise.all((event.images || []).map(async (image: any) => {
-            return Image.create({
+            const existingImage = await Image.findOne({ url: image.url });
+            return existingImage ?? Image.create({
                 ratio: image.ratio,
                 url: image.url,
                 width: image.width,
@@ -192,13 +183,35 @@ export const fetchAllTicketmasterEvents = async (
         const salesRef = await Sales.create({
             startDateTime: event.sales?.public?.startDateTime,
             endDateTime: event.sales?.public?.endDateTime,
+            startTBD: event.sales?.public?.startTBD || false,
+            startTBA: event.sales?.public?.startTBA || false,
+            endTBD: event.sales?.public?.endTBD || false,
+            endTBA: event.sales?.public?.endTBA || false
         });
 
         const dateRef = await DateInfo.create({
-            start: event.dates?.start,
-            end: event.dates?.end,
-            timezone: event.dates?.timezone,
-            status: event.dates?.status?.code,
+            start: {
+                localDate: event.dates?.start?.localDate || '',
+                localTime: event.dates?.start?.localTime || '',
+                dateTime: event.dates?.start?.dateTime || '',
+                dateTBD: event.dates?.start?.dateTBD || false,
+                dateTBA: event.dates?.start?.dateTBA || false,
+                timeTBA: event.dates?.start?.timeTBA || false,
+                noSpecificTime: event.dates?.start?.noSpecificTime || false
+            },
+            end: {
+                localTime: event.dates?.end?.localTime || '',
+                dateTime: event.dates?.end?.dateTime || '',
+                approximate: event.dates?.end?.approximate || false,
+                noSpecificTime: event.dates?.end?.noSpecificTime || false
+            },
+            access: {
+                startDateTime: event.dates?.access?.startDateTime || '',
+                endDateTime: event.dates?.access?.endDateTime || ''
+            },
+            timezone: event.dates?.timezone || '',
+            status: event.dates?.status?.code || '',
+            spanMultipleDays: event.dates?.spanMultipleDays || false
         });
 
         const venueRef = await Venue.findOneAndUpdate(
@@ -210,32 +223,41 @@ export const fetchAllTicketmasterEvents = async (
                 timezone: venue.timezone,
                 city: venue.city?.name || city,
                 country: venue.country?.countryCode || countryCode,
-                address: venue.address?.line1,
-                location: { longitude, latitude }
+                address: {
+                    line1: venue.address?.line1,
+                    line2: venue.address?.line2 || ''
+                },
+                location: { longitude, latitude },
+                markets: venue.markets,
+                dmas: venue.dmas,
+                parkingDetail: venue.parkingDetail,
+                accessibleSeatingDetail: venue.accessibleSeatingDetail,
+                generalInfo: venue.generalInfo,
+                ada: venue.ada
             },
             { upsert: true, new: true }
         );
 
-        // Handling price ranges as ObjectId references with validation
         const priceRangeRefs = await Promise.all((event.priceRanges || []).map(async (priceRange: any) => {
             if (priceRange.min !== undefined && priceRange.max !== undefined) {
                 const newPriceRange = await PriceRange.create({
                     type: priceRange.type || 'standard',
                     currency: priceRange.currency,
                     min: priceRange.min,
-                    max: priceRange.max,
+                    max: priceRange.max
                 });
                 return newPriceRange._id;
-            } else {
-                console.warn(`Skipping incomplete price range for event "${event.name}".`);
-                return null;
             }
-        }).filter((ref: mongoose.Types.ObjectId | null): ref is mongoose.Types.ObjectId => ref !== null)); // Type assertion for non-null values
+            return null;
+        }).filter((ref: any): ref is mongoose.Types.ObjectId => ref !== null));
 
-        // Handling attractions as ObjectId references
         const attractionRefs = await Promise.all((event._embedded?.attractions || []).map(async (attraction: any) => {
             const existingAttraction = await Attraction.findOne({ name: attraction.name });
-            return existingAttraction ? existingAttraction._id : (await Attraction.create({ name: attraction.name, url: attraction.url }))._id;
+            return existingAttraction ? existingAttraction._id : (await Attraction.create({
+                name: attraction.name,
+                url: attraction.url,
+                aliases: attraction.aliases
+            }))._id;
         }));
 
         return {
@@ -250,14 +272,21 @@ export const fetchAllTicketmasterEvents = async (
             images: imageRefs.map((ref: any) => ref._id),
             venue: venueRef._id,
             location: { latitude, longitude },
-            priceRanges: priceRangeRefs, 
+            priceRanges: priceRangeRefs,
             attractions: attractionRefs,
-            source: 'ticketmaster', 
-            sourceId: event.id, 
+            source: 'ticketmaster',
+            sourceId: event.id
         };
     }));
 
+    // Insert valid events into EventDetails
     const validEventData = eventDetailsData.filter(eventData => eventData !== null);
-    await EventDetails.insertMany(validEventData);
-    console.log(`Successfully saved ${validEventData.length} events.`);
+    if (validEventData.length > 0) {
+        await EventDetails.insertMany(validEventData);
+        console.log(`Successfully saved ${validEventData.length} events.`);
+    } else {
+        console.log("No valid events to save.");
+    }
 };
+
+
