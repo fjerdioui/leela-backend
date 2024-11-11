@@ -18,7 +18,6 @@ export const getEvents = async (req: Request, res: Response): Promise<void> => {
 
     console.log("Backend: Incoming filters:", { minLat, maxLat, minLng, maxLng, musicType, genre, startDate, endDate });
 
-    // Validate and parse query parameters
     if (!minLat || !maxLat || !minLng || !maxLng) {
         res.status(400).json({ message: "Bounding box parameters are required." });
         return;
@@ -35,42 +34,89 @@ export const getEvents = async (req: Request, res: Response): Promise<void> => {
             return;
         }
 
-        const query: any = {
-            "location.latitude": { $gte: parsedMinLat, $lte: parsedMaxLat },
-            "location.longitude": { $gte: parsedMinLng, $lte: parsedMaxLng },
-        };
-
-        // Add music type filter
-        if (musicType) {
-            query["classifications.segment"] = musicType; // Assuming `segment` contains music type
-        }
-
-        // Add genre filter
-        if (genre) {
-            query["classifications.genre"] = genre; // Assuming `genre` field exists
-        }
-
-        // Add date range filter
-        if (startDate || endDate) {
-            query["dates.startDate"] = {};
-            if (startDate) {
-                query["dates.startDate"].$gte = new Date(startDate as string);
+        const query: any = [
+            // Stage 1: $match - Apply bounding box filter
+            {
+                $match: {
+                    "location.latitude": { $gte: parsedMinLat, $lte: parsedMaxLat },
+                    "location.longitude": { $gte: parsedMinLng, $lte: parsedMaxLng },
+                }
+            },
+            // Stage 2: $lookup - Join collections
+            {
+                $lookup: {
+                    from: "classifications",
+                    localField: "classifications", // Assuming classifications is an ObjectId or array of ObjectIds
+                    foreignField: "_id",
+                    as: "classifications"
+                }
+            },
+            {
+                $lookup: {
+                    from: "venues",
+                    localField: "venue",
+                    foreignField: "_id",
+                    as: "venue"
+                }
+            },
+            {
+                $lookup: {
+                    from: "sales",
+                    localField: "sales",
+                    foreignField: "_id",
+                    as: "sales"
+                }
+            },
+            {
+                $lookup: {
+                    from: "dateinfos",
+                    localField: "dates",
+                    foreignField: "_id",
+                    as: "dates"
+                }
+            },
+            // Stage 3: $addFields - Ensure all arrays exist
+            {
+                $addFields: {
+                    classifications: { $ifNull: ["$classifications", []] },
+                    dates: { $ifNull: ["$dates", []] },
+                    sales: { $ifNull: ["$sales", []] },
+                    venue: { $ifNull: ["$venue", []] }
+                }
+            },
+            // Stage 4: $match - Apply filters for classifications and dates
+            {
+                $match: {
+                    ...(musicType && { "classifications.segment": musicType }),
+                    ...(genre && { "classifications.genre": genre }),
+                    ...(startDate || endDate
+                        ? {
+                              "dates.start.dateTime": {
+                                  ...(startDate ? { $gte: new Date(startDate as string) } : {}),
+                                  ...(endDate ? { $lte: new Date(endDate as string) } : {})
+                              }
+                          }
+                        : {})
+                }
+            },
+            // Stage 5: $project - Select required fields
+            {
+                $project: {
+                    name: 1,
+                    location: 1,
+                    url: 1,
+                    "venue.address": 1,
+                    "sales.startDateTime": 1,
+                    "sales.endDateTime": 1,
+                    "dates.start.dateTime": 1,
+                    "dates.end.dateTime": 1,
+                    "classifications.segment": 1,
+                    "classifications.genre": 1
+                }
             }
-            if (endDate) {
-                query["dates.startDate"].$lte = new Date(endDate as string);
-            }
-        }
+        ];
 
-        console.log("Backend: Parsed query:", query);
-
-        // Fetch events within the bounding box and filters
-        const events = await EventDetails.find(
-            query,
-            "name location url dates sales classifications"
-        )
-            .populate("dates", "startDate endDate")
-            .populate("sales", "public salesStart salesEnd")
-            .populate("classifications", "segment genre subGenre");
+        const events = await EventDetails.aggregate(query);
 
         if (events.length === 0) {
             console.log("No events found with specified filters.");
@@ -80,6 +126,7 @@ export const getEvents = async (req: Request, res: Response): Promise<void> => {
 
         console.log(`Found ${events.length} events with specified filters.`);
         res.status(200).json(events);
+
     } catch (error: any) {
         console.error("Error fetching events:", error.message);
         res.status(500).json({
@@ -88,7 +135,6 @@ export const getEvents = async (req: Request, res: Response): Promise<void> => {
         });
     }
 };
-
 
 /**
  * Creates a new event and saves it to the database.
