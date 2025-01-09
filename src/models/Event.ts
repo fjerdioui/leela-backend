@@ -19,7 +19,8 @@ export interface IEvent extends Document {
         min: number;
         max: number;
     };
-    musicStyle: string;
+    eventType: string; // Generalized field for event type (e.g., Music, Sports, Theater)
+    genre?: string; // Optional field for specific genres
     thumbnailImage: string;
     shortDescription: string;
     ticketLink: string;
@@ -43,7 +44,8 @@ const EventSchema: Schema = new Schema({
         min: { type: Number },
         max: { type: Number },
     },
-    musicStyle: { type: String, required: true },
+    eventType: { type: String, required: true }, // Generalized field for the type of event
+    genre: { type: String }, // Optional field for genres
     thumbnailImage: { type: String },
     shortDescription: { type: String },
     ticketLink: { type: String, required: true },

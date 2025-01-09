@@ -1,22 +1,23 @@
 import { Request, Response } from 'express';
+import asyncHandler from 'express-async-handler';
 import Event from '../models/Event';
 import EventDetails from '../models/EventDetails';
 import moment from 'moment';
+import mongoose from 'mongoose';
 import { fetchAllTicketmasterEvents } from '../api/fetchTicketmasterEvents';
 import Classification from '../models/Classification';
 import DateInfo from '../models/DateInfo';
 import Sales from '../models/Sales';
 import Venue from '../models/Venue';
 import Image from '../models/Image';
-import mongoose from 'mongoose';
 
 /**
  * Fetches events within specified geographic bounds.
  */
 export const getEvents = async (req: Request, res: Response): Promise<void> => {
-    const { minLat, maxLat, minLng, maxLng, musicType, genre, startDate, endDate } = req.query;
+    const { minLat, maxLat, minLng, maxLng, eventType, genre, startDate, endDate } = req.query;
 
-    console.log("Backend: Incoming filters:", { minLat, maxLat, minLng, maxLng, musicType, genre, startDate, endDate });
+    console.log("Backend: Incoming filters:", { minLat, maxLat, minLng, maxLng, eventType, genre, startDate, endDate });
 
     if (!minLat || !maxLat || !minLng || !maxLng) {
         res.status(400).json({ message: "Bounding box parameters are required." });
@@ -35,18 +36,16 @@ export const getEvents = async (req: Request, res: Response): Promise<void> => {
         }
 
         const query: any = [
-            // Stage 1: $match - Apply bounding box filter
             {
                 $match: {
                     "location.latitude": { $gte: parsedMinLat, $lte: parsedMaxLat },
-                    "location.longitude": { $gte: parsedMinLng, $lte: parsedMaxLng },
+                    "location.longitude": { $gte: parsedMinLng, $lte: parsedMaxLng }
                 }
             },
-            // Stage 2: $lookup - Join collections
             {
                 $lookup: {
                     from: "classifications",
-                    localField: "classifications", // Assuming classifications is an ObjectId or array of ObjectIds
+                    localField: "classifications",
                     foreignField: "_id",
                     as: "classifications"
                 }
@@ -75,7 +74,6 @@ export const getEvents = async (req: Request, res: Response): Promise<void> => {
                     as: "dates"
                 }
             },
-            // Stage 3: $addFields - Ensure all arrays exist
             {
                 $addFields: {
                     classifications: { $ifNull: ["$classifications", []] },
@@ -84,11 +82,10 @@ export const getEvents = async (req: Request, res: Response): Promise<void> => {
                     venue: { $ifNull: ["$venue", []] }
                 }
             },
-            // Stage 4: $match - Apply filters for classifications and dates
             {
                 $match: {
-                    ...(musicType && { "classifications.segment": musicType }),
-                    ...(genre && { "classifications.genre": genre }),
+                    ...(eventType && { "classifications.segment": { $regex: new RegExp(eventType as string, "i") } }),
+                    ...(genre && { "classifications.genre": { $regex: new RegExp(genre as string, "i") } }),
                     ...(startDate || endDate
                         ? {
                               "dates.start.dateTime": {
@@ -99,7 +96,6 @@ export const getEvents = async (req: Request, res: Response): Promise<void> => {
                         : {})
                 }
             },
-            // Stage 5: $project - Select required fields
             {
                 $project: {
                     name: 1,
@@ -113,213 +109,181 @@ export const getEvents = async (req: Request, res: Response): Promise<void> => {
                     "classifications.segment": 1,
                     "classifications.genre": 1
                 }
+            },
+            {
+                $facet: {
+                    events: [{ $match: {} }],
+                    eventTypes: [
+                        { $unwind: "$classifications" },
+                        { $group: { _id: "$classifications.segment" } }
+                    ],
+                    genresByEventType: [
+                        { $unwind: "$classifications" },
+                        {
+                            $group: {
+                                _id: "$classifications.segment",
+                                genres: { $addToSet: "$classifications.genre" }
+                            }
+                        }
+                    ]
+                }
             }
         ];
 
-        const events = await EventDetails.aggregate(query);
+        const result = await EventDetails.aggregate(query);
 
-        if (events.length === 0) {
-            console.log("No events found with specified filters.");
+        if (!result || result.length === 0) {
             res.status(404).json({ message: "No events found with specified filters." });
             return;
         }
 
-        console.log(`Found ${events.length} events with specified filters.`);
-        res.status(200).json(events);
+        const { events, eventTypes, genresByEventType } = result[0];
 
+        // Format genresByEventType into a map
+        const genresMap = genresByEventType.reduce((acc: any, item: any) => {
+            acc[item._id] = item.genres;
+            return acc;
+        }, {});
+
+        res.status(200).json({
+            events,
+            eventTypes: eventTypes.map((type: { _id: string }) => type._id),
+            genresByEventType: genresMap
+        });
     } catch (error: any) {
         console.error("Error fetching events:", error.message);
         res.status(500).json({
             error: "Error fetching events",
-            details: error.message,
+            details: error.message
         });
     }
 };
 
+
 /**
  * Creates a new event and saves it to the database.
  */
-export const createEvent = async (req: Request, res: Response) => {
-    try {
-        const event = new Event(req.body);
-        await event.save();
-        res.status(201).json(event);
-    } catch (error) {
-        console.error('Error creating event:', error);
-        res.status(400).json({ error: 'Error creating event' });
-    }
-};
+export const createEvent = asyncHandler(async (req: Request, res: Response) => {
+    const event = new Event(req.body);
+    await event.save();
+    res.status(201).json(event);
+});
 
 /**
  * Bulk uploads events to the database.
  */
-export const uploadEvents = async (req: Request, res: Response) => {
-    try {
-        const events = await Event.insertMany(req.body.events);
-        res.status(201).json(events);
-    } catch (error) {
-        console.error('Error uploading events:', error);
-        res.status(400).json({ error: 'Error uploading events' });
-    }
-};
+export const uploadEvents = asyncHandler(async (req: Request, res: Response) => {
+    const events = await Event.insertMany(req.body.events);
+    res.status(201).json(events);
+});
 
 /**
  * Fetches a specific event by its ID from the database.
  */
-export const getEventById = async (req: Request, res: Response) => {
-    try {
-        const eventId = req.params.id;
+export const getEventById = asyncHandler(async (req: Request, res: Response) => {
+    const { id } = req.params;
 
-        if (!mongoose.Types.ObjectId.isValid(eventId)) {
-            return res.status(400).json({ message: 'Invalid event ID format' });
-        }
-
-        // Aggregation pipeline to match the event by ID and populate all related fields
-        const event = await EventDetails.aggregate([
-            { $match: { _id: new mongoose.Types.ObjectId(eventId) } },
-
-            // Populate images
-            {
-                $lookup: {
-                    from: 'images',
-                    localField: 'images',
-                    foreignField: '_id',
-                    as: 'images'
-                }
-            },
-
-            // Populate venue
-            {
-                $lookup: {
-                    from: 'venues',
-                    localField: 'venue',
-                    foreignField: '_id',
-                    as: 'venue'
-                }
-            },
-
-            // Populate classifications
-            {
-                $lookup: {
-                    from: 'classifications',
-                    localField: 'classifications',
-                    foreignField: '_id',
-                    as: 'classifications'
-                }
-            },
-
-            // Populate dates
-            {
-                $lookup: {
-                    from: 'dates',
-                    localField: 'dates',
-                    foreignField: '_id',
-                    as: 'dates'
-                }
-            },
-
-            // Populate sales
-            {
-                $lookup: {
-                    from: 'sales',
-                    localField: 'sales',
-                    foreignField: '_id',
-                    as: 'sales'
-                }
-            },
-
-            // Populate attractions
-            {
-                $lookup: {
-                    from: 'attractions',
-                    localField: 'attractions',
-                    foreignField: '_id',
-                    as: 'attractions'
-                }
-            },
-
-            // Conditional lookup for priceRanges (only if it exists and is not empty)
-            {
-                $lookup: {
-                    from: 'priceRanges',
-                    localField: 'priceRanges',
-                    foreignField: '_id',
-                    as: 'priceRanges'
-                }
-            },
-
-            // Remove empty priceRanges if it does not contain valid references
-            {
-                $addFields: {
-                    priceRanges: {
-                        $cond: {
-                            if: { $or: [{ $eq: ["$priceRanges", []] }, { $eq: ["$priceRanges", null] }] },
-                            then: [],
-                            else: "$priceRanges"
-                        }
-                    }
-                }
-            }
-        ]);
-
-        if (!event || event.length === 0) {
-            return res.status(404).json({ message: 'Event not found' });
-        }
-
-        res.status(200).json(event[0]); // Return the first item in the array
-    } catch (error) {
-        console.error('Error fetching event by ID:', error);
-        res.status(500).json({ message: 'Server error', error });
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+        res.status(400).json({ message: "Invalid event ID format." });
+        return;
     }
-};
+
+    const pipeline = buildEventAggregationPipeline({ _id: new mongoose.Types.ObjectId(id) });
+    const event = await EventDetails.aggregate(pipeline);
+
+    if (!event || event.length === 0) {
+        res.status(404).json({ message: "Event not found." });
+        return;
+    }
+
+    res.status(200).json(event[0]);
+});
+
+/**
+ * Fetch detailed information for multiple events by their IDs.
+ */
+export const handleBatchEventDetails = asyncHandler(async (req: Request, res: Response) => {
+    const { ids } = req.query;
+
+    if (!ids || typeof ids !== 'string') {
+        res.status(400).json({ error: "Invalid or missing `ids` parameter." });
+        return;
+    }
+
+    const eventIds = ids.split(',').map(id => id.trim());
+    const invalidIds = eventIds.filter(id => !mongoose.Types.ObjectId.isValid(id));
+
+    if (invalidIds.length > 0) {
+        res.status(400).json({ message: `Invalid event ID format: ${invalidIds.join(', ')}` });
+        return;
+    }
+
+    const pipeline = buildEventAggregationPipeline({ _id: { $in: eventIds.map(id => new mongoose.Types.ObjectId(id)) } });
+    const events = await EventDetails.aggregate(pipeline);
+
+    res.status(200).json(events);
+});
 
 /**
  * Fetches events from Ticketmaster API in 1-week increments for a total of 8 weeks
  * and inserts/updates them in the database.
  */
-export const fetchEvents = async (req: Request, res: Response) => {
+export const fetchEvents = asyncHandler(async (req: Request, res: Response) => {
     const { countryCode, city, type } = req.query;
 
     if (!countryCode || !city || !type) {
-        console.log('Missing required parameters');
-        return res.status(400).json({ message: "countryCode, city, and type are required parameters." });
+        res.status(400).json({ message: "countryCode, city, and type are required parameters." });
+        return;
     }
 
     let startDate = moment().toISOString();
     let endDate = moment().add(1, 'weeks').toISOString();
     const totalWeeks = 8;
 
-    try {
-        for (let week = 0; week < totalWeeks; week++) {
-            console.log(`Fetching events for week ${week + 1}: ${startDate} to ${endDate}`);
+    for (let week = 0; week < totalWeeks; week++) {
+        await fetchAllTicketmasterEvents({
+            countryCode: countryCode as string,
+            city: city as string,
+            eventType: type as string,
+            startDate,
+            endDate,
+        });
 
-            await fetchAllTicketmasterEvents({
-                countryCode: countryCode as string,
-                city: city as string,
-                eventType: type as string,
-                startDate,
-                endDate
-            });
-
-            startDate = moment(startDate).add(1, 'weeks').toISOString();
-            endDate = moment(endDate).add(1, 'weeks').toISOString();
-        }
-
-        console.log('Successfully completed fetching events for 8 weeks.');
-        res.status(200).json({ message: 'Ticketmaster events fetch completed for 8 weeks.' });
-    } catch (error) {
-        console.error('Error fetching Ticketmaster events:', error);
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        res.status(500).json({ message: 'Failed to fetch events from Ticketmaster', error: errorMessage });
+        startDate = moment(startDate).add(1, 'weeks').toISOString();
+        endDate = moment(endDate).add(1, 'weeks').toISOString();
     }
-};
 
-export const clearDB = async () => {
-    await EventDetails.deleteMany({});
-    await Classification.deleteMany({});
-    await DateInfo.deleteMany({});
-    await Sales.deleteMany({});
-    await Image.deleteMany({});
-    await Venue.deleteMany({});
-    console.log('Database cleared successfully before fetching events.');
-}
+    res.status(200).json({ message: "Ticketmaster events fetch completed for 8 weeks." });
+});
+
+/**
+ * Clears the database.
+ */
+export const clearDB = asyncHandler(async (_req: Request, res: Response) => {
+    await Promise.all([
+        EventDetails.deleteMany({}),
+        Classification.deleteMany({}),
+        DateInfo.deleteMany({}),
+        Sales.deleteMany({}),
+        Image.deleteMany({}),
+        Venue.deleteMany({}),
+    ]);
+    res.status(200).json({ message: "Database cleared successfully." });
+});
+
+/**
+ * Builds an aggregation pipeline for querying events.
+ */
+export const buildEventAggregationPipeline = (filter: object = {}) => {
+    return [
+        { $match: filter },
+        { $lookup: { from: 'images', localField: 'images', foreignField: '_id', as: 'images' } },
+        { $lookup: { from: 'venues', localField: 'venue', foreignField: '_id', as: 'venue' } },
+        { $lookup: { from: 'classifications', localField: 'classifications', foreignField: '_id', as: 'classifications' } },
+        { $lookup: { from: 'dates', localField: 'dates', foreignField: '_id', as: 'dates' } },
+        { $lookup: { from: 'sales', localField: 'sales', foreignField: '_id', as: 'sales' } },
+        { $lookup: { from: 'attractions', localField: 'attractions', foreignField: '_id', as: 'attractions' } },
+        { $lookup: { from: 'priceRanges', localField: 'priceRanges', foreignField: '_id', as: 'priceRanges' } },
+        { $addFields: { priceRanges: { $ifNull: ["$priceRanges", []] } } },
+    ];
+};

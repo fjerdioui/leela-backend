@@ -3,6 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import connectDB from './config/db';
 import eventRoutes from './routes/eventRoutes';
+import profileRoutes from './routes/profileRoutes';
 
 dotenv.config(); // Load environment variables from .env
 
@@ -21,7 +22,12 @@ connectDB();
 // fetchTicketmasterEvents(); // Fetch events from Ticketmaster
 
 // Routes
+
+//-- Event routes
 app.use('/api', eventRoutes); // Use the event routes
+
+//-- profile routes
+app.use('/api/profiles', profileRoutes);
 
 // Test Route to verify server and DB connection
 app.get('/api/test', (req, res) => {
